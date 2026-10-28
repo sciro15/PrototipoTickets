@@ -1,0 +1,65 @@
+name: sistema-gestion-tickets
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Defina MYSQL_ROOT_PASSWORD en .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-tickets_db}
+      MYSQL_USER: ${MYSQL_USER:-tickets_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Defina MYSQL_PASSWORD en .env}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - tickets_net
+    # Sin "ports": MySQL NO se publica en el host por defecto.
+    # Para Workbench use: docker compose -f docker-compose.yml -f docker-compose.mysql-local.yml up -d
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # El host es "mysql" (nombre del servicio en la red de Docker), no localhost
+      DATABASE_URL: mysql://${MYSQL_USER:-tickets_user}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-tickets_db}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+      RUN_SEED: ${RUN_SEED:-true}
+      JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET en .env (mínimo 16 caracteres)}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      SEED_PASSWORD: ${SEED_PASSWORD:-Demo1234!}
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    networks:
+      - tickets_net
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    networks:
+      - tickets_net
+
+volumes:
+  mysql_data:
+
+networks:
+  tickets_net:
+    driver: bridge
